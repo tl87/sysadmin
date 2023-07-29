@@ -13,21 +13,16 @@
         path: /usr/bin/systemd-timesyncd
       register: timesyncd_debian
       when: ansible_os_family == 'Debian'
-    - name: Check if systemd-timesync is installed (Fedora)
-      stat:
-        path: /usr/bin/systemd-timesyncd
-      register: timesyncd_fedora
-      when: ansible_os_family == 'RedHat'
     - name: Install systemd-timesync on Debian using apt
       apt:
         name: systemd-timesyncd
         state: present
       when: ansible_os_family == 'Debian' and not timesyncd_debian.stat.exists
-    - name: Install systemd-timesync on Fedora using dnf
-      dnf:
-        name: systemd-timesyncd
+    - name: Install Chrony package (Fedora)
+      package:
+        name: chrony
         state: present
-      when: ansible_os_family == 'RedHat' and not timesyncd_fedora.stat.exists
+      when: ansible_os_family == 'RedHat'
 
 ### FIREWALL SETUP ###
 
@@ -35,9 +30,11 @@
       shell: ufw allow out 123/udp comment "NTP OUT"
       when: ansible_os_family == 'Debian'
 
-    - name: Add rich rule to firewalld
+    - name: Allow NTP traffic in firewall
       firewalld:
-        rich_rule: 'rule family="ipv4" source address="0.0.0.0/0" port port="123" protocol="udp" accept'
+        service: ntp
+        state: enabled
+        immediate: yes
       when: ansible_os_family == 'RedHat'
 
 ### ADD CONFIG ###
@@ -61,12 +58,13 @@
           # See timesyncd.conf(5) for details.
 
           [Time]
-          NTP=xxx.xxx.xxx.xxx
+          NTP=x.x.x.x
           #FallbackNTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org
           #RootDistanceMaxSec=5
           #PollIntervalMinSec=32
           #PollIntervalMaxSec=2048
       loop: [1]
+      when: ansible_os_family == 'Debian'
 
 ### ENABLE NTP ###
 
@@ -79,7 +77,15 @@
       systemd:
         name: systemd-timesyncd
         enabled: yes
+      when: ansible_os_family == 'Debian'
     - name: Start systemd-timesyncd.service
       systemd:
         name: systemd-timesyncd
         state: started
+      when: ansible_os_family == 'Debian'
+    - name: Enable and start Chrony service
+      service:
+        name: chronyd
+        state: started
+        enabled: yes
+      when: ansible_os_family == 'RedHat'
