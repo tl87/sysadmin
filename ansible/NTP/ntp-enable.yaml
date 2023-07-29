@@ -1,0 +1,85 @@
+---
+- hosts:
+    - host1
+    - host2
+  become: true
+  become_user: root
+  tasks:
+
+### INSTALL TIMESYNC ###
+
+    - name: Check if systemd-timesync is installed (Debian)
+      stat:
+        path: /usr/bin/systemd-timesyncd
+      register: timesyncd_debian
+      when: ansible_os_family == 'Debian'
+    - name: Check if systemd-timesync is installed (Fedora)
+      stat:
+        path: /usr/bin/systemd-timesyncd
+      register: timesyncd_fedora
+      when: ansible_os_family == 'RedHat'
+    - name: Install systemd-timesync on Debian using apt
+      apt:
+        name: systemd-timesyncd
+        state: present
+      when: ansible_os_family == 'Debian' and not timesyncd_debian.stat.exists
+    - name: Install systemd-timesync on Fedora using dnf
+      dnf:
+        name: systemd-timesyncd
+        state: present
+      when: ansible_os_family == 'RedHat' and not timesyncd_fedora.stat.exists
+
+### FIREWALL SETUP ###
+
+    - name: Enable port 123/udp on UFW
+      shell: ufw allow out 123/udp comment "NTP OUT"
+      when: ansible_os_family == 'Debian'
+
+    - name: Add rich rule to firewalld
+      firewalld:
+        rich_rule: 'rule family="ipv4" source address="0.0.0.0/0" port port="123" protocol="udp" accept'
+      when: ansible_os_family == 'RedHat'
+
+### ADD CONFIG ###
+
+    - name: Insert content into timesyncd.conf
+      blockinfile:
+        path: /etc/systemd/timesyncd.conf
+        marker: "# {mark} ANSIBLE MANAGED BLOCK {{ item }}"
+        block: |
+          #  This file is part of systemd.
+          #
+          #  systemd is free software; you can redistribute it and/or modify it
+          #  under the terms of the GNU Lesser General Public License as published by
+          #  the Free Software Foundation; either version 2.1 of the License, or
+          #  (at your option) any later version.
+          #
+          # Entries in this file show the compile time defaults.
+          # You can change settings by editing this file.
+          # Defaults can be restored by simply deleting this file.
+          #
+          # See timesyncd.conf(5) for details.
+
+          [Time]
+          NTP=xxx.xxx.xxx.xxx
+          #FallbackNTP=0.debian.pool.ntp.org 1.debian.pool.ntp.org 2.debian.pool.ntp.org 3.debian.pool.ntp.org
+          #RootDistanceMaxSec=5
+          #PollIntervalMinSec=32
+          #PollIntervalMaxSec=2048
+      loop: [1]
+
+### ENABLE NTP ###
+
+    - name: Enable NTP
+      command: timedatectl set-ntp on
+
+### SETUP SYSTEMCTL ###
+
+    - name: Enable systemd-timesyncd.service
+      systemd:
+        name: systemd-timesyncd
+        enabled: yes
+    - name: Start systemd-timesyncd.service
+      systemd:
+        name: systemd-timesyncd
+        state: started
